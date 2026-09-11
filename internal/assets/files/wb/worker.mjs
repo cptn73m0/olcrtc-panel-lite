@@ -330,7 +330,14 @@ async function runWB(context, initialPage) {
     try { roomID ||= findRoomID(await response.json()); } catch { /* Empty or consumed body. */ }
   });
   let page = initialPage;
-  await page.goto(job.home_url || 'https://stream.wb.ru', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await page.bringToFront().catch(() => {});
+  const targetURL = job.home_url || 'https://stream.wb.ru';
+  try {
+    await page.goto(targetURL, { waitUntil: 'commit', timeout: 30_000 });
+  } catch (err) {
+    console.warn('Initial navigation note:', err?.message || err);
+    page.goto(targetURL, { timeout: 60_000 }).catch(() => {});
+  }
   writeState('awaiting_login', 'Войдите в WB Stream и пройдите CAPTCHA', 20);
   for (;;) {
     if (Date.now() > readDeadline()) throw new Error('Время авторизации истекло');
@@ -355,12 +362,12 @@ async function runWB(context, initialPage) {
     }
   } else {
     writeState('refreshing_token', 'Получение свежего токена WB...', 65);
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.reload({ waitUntil: 'commit', timeout: 30_000 }).catch(() => {});
     await page.waitForTimeout(3000);
     if (!accountToken && job.existing_room_id) {
       await page.goto(`https://stream.wb.ru/${encodeURIComponent(job.existing_room_id)}`, {
-        waitUntil: 'domcontentloaded', timeout: 60_000,
-      });
+        waitUntil: 'commit', timeout: 30_000,
+      }).catch(() => {});
       await page.waitForTimeout(3000);
     }
   }
@@ -393,7 +400,13 @@ async function runTelemost(context, initialPage) {
     try { roomID ||= findTelemostRoomID(await response.json()); } catch { /* The 201 response may have no saved body. */ }
   });
 
-  await page.goto(job.home_url || 'https://telemost.yandex.ru', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await page.bringToFront().catch(() => {});
+  const targetURL = job.home_url || 'https://telemost.yandex.ru';
+  try {
+    await page.goto(targetURL, { waitUntil: 'commit', timeout: 30_000 });
+  } catch (err) {
+    page.goto(targetURL, { timeout: 60_000 }).catch(() => {});
+  }
   const createCall = page.locator(telemostSelectors.createCall).first();
   await createCall.waitFor({ state: 'visible', timeout: 60_000 });
   writeState('creating_room', 'Создание новой комнаты Telemost...', 40);
@@ -438,7 +451,14 @@ async function main() {
       ignoreDefaultArgs: ['--enable-automation'],
       locale: 'ru-RU', timezoneId: 'Europe/Moscow',
       permissions: ['clipboard-read', 'clipboard-write'],
-      args: ['--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-blink-features=AutomationControlled', '--window-size=1280,800'],
+      args: [
+        '--disable-http2',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-background-networking',
+        '--disable-blink-features=AutomationControlled',
+        '--window-size=1280,800',
+      ],
     });
     activeContext = context;
     await context.addInitScript(() => {
