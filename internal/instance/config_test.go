@@ -176,6 +176,21 @@ func TestRenderYAMLUsesOfficialFields(t *testing.T) {
 	}
 }
 
+func TestRenderYAMLOmitEmptyData(t *testing.T) {
+	item := validInstance()
+	b, err := RenderYAML(item, "/etc/olcrtc-panel/instances/1/key.hex", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := yaml.Unmarshal(b, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded["data"]; ok {
+		t.Fatalf("expected data to be omitted when empty, got: %v", decoded["data"])
+	}
+}
+
 func TestParseProxy(t *testing.T) {
 	proxy, err := ParseProxy("user:pass@127.0.0.1:40000")
 	if err != nil {

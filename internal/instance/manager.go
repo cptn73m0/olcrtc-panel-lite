@@ -445,6 +445,16 @@ func (m *Manager) decryptSecrets(item model.Instance) (model.Instance, error) {
 	return item, err
 }
 
+func (m *Manager) effectiveDataPath() string {
+	sharedData := filepath.Join(m.releaseDir, "data")
+	if _, err := os.Stat(filepath.Join(sharedData, "names")); err == nil {
+		if _, err := os.Stat(filepath.Join(sharedData, "surnames")); err == nil {
+			return sharedData
+		}
+	}
+	return ""
+}
+
 // Reconcile rewrites all instance YAML files to use the current bundle data path.
 // It must be called after opening the database but before the HTTP server starts.
 func (m *Manager) Reconcile(ctx context.Context) error {
@@ -461,7 +471,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	}
 	backups := make([]backup, 0, len(items))
 	newConfigs := make(map[int64][]byte, len(items))
-	dataPath := filepath.Join(m.releaseDir, "data")
+	dataPath := m.effectiveDataPath()
 	for _, item := range items {
 		plain, decryptErr := m.decryptSecrets(item)
 		if decryptErr != nil {
@@ -511,7 +521,7 @@ func (m *Manager) writeInstanceFiles(item model.Instance, key string) error {
 }
 
 func (m *Manager) writeConfig(item model.Instance, _ string) error {
-	dataPath := filepath.Join(m.releaseDir, "data")
+	dataPath := m.effectiveDataPath()
 	b, err := RenderYAML(item, m.keyPath(item.ID), dataPath)
 	if err != nil {
 		return err
