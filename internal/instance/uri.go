@@ -72,12 +72,6 @@ func standardPayload(item model.Instance) string {
 		if item.Options.VideoFPS != 30 {
 			values["video-fps"] = strconv.Itoa(item.Options.VideoFPS)
 		}
-		if item.Options.VideoBitrate != "2M" {
-			values["video-bitrate"] = item.Options.VideoBitrate
-		}
-		if item.Options.VideoHW != "none" {
-			values["video-hw"] = item.Options.VideoHW
-		}
 		if item.Options.VideoCodec != "qrcode" {
 			values["video-codec"] = item.Options.VideoCodec
 		}

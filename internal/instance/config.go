@@ -302,7 +302,7 @@ type yamlConfig struct {
 	Liveness  yamlLiveness   `yaml:"liveness"`
 	Lifecycle *yamlLifecycle `yaml:"lifecycle,omitempty"`
 	Traffic   *yamlTraffic   `yaml:"traffic,omitempty"`
-	Data      string         `yaml:"data"`
+	Data      string         `yaml:"data,omitempty"`
 	Debug     bool           `yaml:"debug"`
 }
 
