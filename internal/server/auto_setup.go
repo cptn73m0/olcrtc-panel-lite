@@ -90,6 +90,15 @@ func (s *Server) readAutoSetupStateLocked(ctx context.Context) (AutoSetupState, 
 	state.WBRoomIDs = autoSetupRooms(state.WBRoomIDs)
 	state.CreatedInstances = autoSetupInstanceIDs(state.CreatedInstances)
 	state.TelemostRoomID = cleanAutoSetupText(state.TelemostRoomID, maxAutoSetupRoomLength)
+	if state.Step == "creating_instances" {
+		state.Step = "wb_rooms_create"
+		state.Progress = 65
+		if len(state.WBRoomIDs) >= 3 {
+			state.Progress = 75
+			state.Message = "Комнаты WB Stream готовы"
+			state.CurrentAction = "Все комнаты созданы. Нажмите «Создать инстансы»"
+		}
+	}
 	if state.StartedAt.IsZero() {
 		state.StartedAt = time.Now().UTC()
 	}
@@ -351,9 +360,15 @@ func (s *Server) handleAutoSetupSkipTelemost(w http.ResponseWriter, r *http.Requ
 		markAutoSetupStep(state, "telemost_skipped")
 		if state.Step == "telemost_prompt" || state.Step == "telemost_auth_vnc" || state.Step == "telemost_room_create" {
 			state.Step = "wb_rooms_create"
-			state.Progress = 65
-			state.Message = "Telemost пропущен. Создайте комнаты WB Stream"
-			state.CurrentAction = "Ожидание Room ID WB Stream"
+			if len(state.WBRoomIDs) >= 3 {
+				state.Progress = 75
+				state.Message = "Telemost пропущен. Комнаты WB Stream готовы"
+				state.CurrentAction = "Все комнаты созданы. Нажмите «Создать инстансы»"
+			} else {
+				state.Progress = 65
+				state.Message = "Telemost пропущен. Создайте комнаты WB Stream"
+				state.CurrentAction = "Ожидание Room ID WB Stream"
+			}
 		}
 	})
 	if err != nil {
@@ -408,6 +423,10 @@ func (s *Server) handleAutoSetupComplete(w http.ResponseWriter, r *http.Request)
 		s.logger.Info("auto-setup complete: calling finishAutoSetup")
 		if err := s.finishAutoSetup(r.Context(), &state, input.StartInstances); err != nil {
 			s.logger.Error("auto-setup complete: finishAutoSetup failed", "error", err)
+			state.Step = "error"
+			state.Error = err.Error()
+			state.Message = "Не удалось создать инстансы"
+			_ = s.saveAutoSetupState(r.Context(), state)
 			writeError(w, r, http.StatusUnprocessableEntity, "auto_setup_complete_failed", err.Error())
 			return
 		}
@@ -526,14 +545,15 @@ func (s *Server) runAutoSetup(ctx context.Context, skipTelemost bool) error {
 	if skipTelemost {
 		markAutoSetupStep(&state, "telemost_skipped")
 	}
-	if len(state.WBRoomIDs) == 0 {
+	if len(state.WBRoomIDs) < 3 {
 		state.Step = "wb_rooms_create"
 		state.Progress = 65
 		state.Message = "Создайте комнаты WB Stream через noVNC"
 		state.CurrentAction = "Ожидание Room ID WB Stream"
 		return s.saveAutoSetupState(ctx, state)
 	}
-	return s.finishAutoSetup(ctx, &state, nil)
+	startFalse := false
+	return s.finishAutoSetup(ctx, &state, &startFalse)
 }
 
 func (s *Server) refreshAutoSetupProgress(ctx context.Context) error {
@@ -586,10 +606,10 @@ func (s *Server) refreshAutoSetupProgress(ctx context.Context) error {
 						state.Message = "Комнаты WB Stream готовы. Выберите Telemost"
 						state.CurrentAction = "Ожидание выбора пользователя"
 					} else {
-						state.Step = "creating_instances"
+						state.Step = "wb_rooms_create"
 						state.Progress = 75
 						state.Message = "Комнаты WB Stream готовы"
-						state.CurrentAction = "Продолжите для создания инстансов"
+						state.CurrentAction = "Все комнаты созданы. Нажмите «Создать инстансы»"
 					}
 				} else {
 					state.Step = "wb_rooms_create"

@@ -81,7 +81,7 @@ async function maybeShowAutoSetup() {
   }
 }
 
-const autoSetupStepOrder = ['welcome', 'playwright_check', 'playwright_install', 'wb_auth_prompt', 'wb_auth_vnc', 'telemost_prompt', 'telemost_auth_vnc', 'creating_instances', 'wb_rooms_create', 'telemost_room_create', 'starting_instances', 'completed'];
+const autoSetupStepOrder = ['welcome', 'playwright_check', 'playwright_install', 'wb_auth_prompt', 'wb_auth_vnc', 'wb_rooms_create', 'telemost_prompt', 'telemost_auth_vnc', 'telemost_room_create', 'creating_instances', 'starting_instances', 'completed'];
 
 function AutoSetupWizard(payload = state.autoSetup.state || {}) {
   const current = payload || {};
@@ -165,9 +165,15 @@ function autoSetupStepActions(current) {
   if (step === 'playwright_install') return '<button class="btn btn-primary" data-action="auto-setup-install">Установить компоненты</button><button class="btn btn-ghost" data-action="auto-setup-manual">Продолжить вручную</button>';
   if (step === 'wb_auth_prompt' || step === 'wb_auth_vnc') return '<button class="btn btn-primary" data-action="auto-setup-auth-wb">Открыть WB Stream</button><button class="btn btn-ghost" data-action="auto-setup-to-rooms">Ввести Room ID вручную</button>';
   if (step === 'telemost_prompt' || step === 'telemost_auth_vnc') return '<button class="btn btn-primary" data-action="auto-setup-auth-telemost">Создать Telemost</button><button class="btn btn-ghost" data-action="auto-setup-skip-telemost">Пропустить Telemost</button>';
-  if (step === 'wb_rooms_create') return '<button class="btn btn-primary" data-action="auto-setup-create-wb-room">Создать комнаты WB</button><button class="btn btn-ghost" data-action="auto-setup-complete">Продолжить</button>';
+  if (step === 'wb_rooms_create') {
+    const filled = (state.autoSetup.wbRooms || []).filter(Boolean).length;
+    if (filled >= 3) {
+      return '<button class="btn btn-primary" data-action="auto-setup-complete">Создать инстансы</button><button class="btn btn-ghost" data-action="auto-setup-dismiss">Пропустить</button>';
+    }
+    return '<button class="btn btn-primary" data-action="auto-setup-create-wb-room">Создать комнаты WB</button><button class="btn btn-ghost" data-action="auto-setup-complete">Продолжить</button>';
+  }
   if (step === 'telemost_room_create') return '<button class="btn btn-primary" data-action="auto-setup-complete">Создать инстансы</button><button class="btn btn-ghost" data-action="auto-setup-skip-telemost">Пропустить Telemost</button>';
-  if (step === 'creating_instances' || step === 'starting_instances') return '<span class="field-hint">Выполняется...</span>';
+  if (step === 'creating_instances' || step === 'starting_instances') return '<span class="field-hint">Выполняется...</span><button class="btn btn-ghost" data-action="auto-setup-retry">Начать заново</button>';
   if (step === 'completed' || step === 'dismissed') return '<button class="btn btn-primary" data-action="auto-setup-dashboard">Перейти к панели</button>';
   return '<button class="btn btn-primary" data-action="auto-setup-retry">Повторить</button><button class="btn btn-ghost" data-action="auto-setup-dismiss">Настроить вручную</button>';
 }
@@ -203,13 +209,20 @@ function stopAutoSetupPolling() {
 async function fetchAutoSetupProgress() {
   if (!state.autoSetup.visible) return;
   try {
+    collectAutoSetupRooms();
     const payload = await api('/api/v1/auto-setup/progress');
     const previousStep = state.autoSetup.state?.step;
     state.autoSetup.state = payload;
     state.autoSetup.skipTelemost = Boolean(payload.skip_telemost);
-    state.autoSetup.wbRooms = [...(payload.wb_room_ids || state.autoSetup.wbRooms || [])];
+    if ((payload.wb_room_ids || []).length >= state.autoSetup.wbRooms.length) {
+      state.autoSetup.wbRooms = [...(payload.wb_room_ids || state.autoSetup.wbRooms || [])];
+    }
     state.autoSetup.telemostRoom = payload.telemost_room_id || state.autoSetup.telemostRoom || '';
-    renderAutoSetupWizard();
+    const active = document.activeElement;
+    const isTyping = active && (active.hasAttribute('data-auto-wb-room') || active.hasAttribute('data-auto-telemost-room'));
+    if (!isTyping) {
+      renderAutoSetupWizard();
+    }
     // Restart polling with appropriate interval if step changed
     if (previousStep !== payload.step) {
       startAutoSetupPolling();
@@ -256,8 +269,13 @@ async function persistAutoSetupDraft() {
 }
 
 function collectAutoSetupRooms() {
-  const values = [...document.querySelectorAll('[data-auto-wb-room]')].map(input => input.value.trim()).filter(Boolean);
-  if (values.length) state.autoSetup.wbRooms = [...new Set(values)].slice(0, 3);
+  const inputs = [...document.querySelectorAll('[data-auto-wb-room]')];
+  if (inputs.length) {
+    inputs.forEach((input, index) => {
+      const val = input.value.trim();
+      if (val) state.autoSetup.wbRooms[index] = val;
+    });
+  }
   const telemost = document.querySelector('[data-auto-telemost-room]');
   if (telemost?.value.trim()) state.autoSetup.telemostRoom = normalizeRoomID('telemost', telemost.value.trim());
 }
@@ -269,6 +287,8 @@ async function completeAutoSetup() {
     const wbRooms = state.autoSetup.wbRooms.length > 0 ? state.autoSetup.wbRooms : (state.autoSetup.state?.wb_room_ids || []);
     const telemostRoom = state.autoSetup.skipTelemost ? '' : (state.autoSetup.telemostRoom || state.autoSetup.state?.telemost_room_id || '');
     console.log('[auto-setup] Completing with:', { wbRooms, telemostRoom, skipTelemost: state.autoSetup.skipTelemost });
+    state.autoSetup.state = { ...(state.autoSetup.state || {}), step: 'creating_instances', progress: 80, message: 'Создание инстансов...', current_action: 'Сохранение конфигураций' };
+    renderAutoSetupWizard();
     // Don't start instances automatically to avoid hanging on systemd service start
     const payload = await api('/api/v1/auto-setup/complete', { method: 'POST', body: JSON.stringify({ wb_room_ids: wbRooms, telemost_room_id: telemostRoom, skip_telemost: state.autoSetup.skipTelemost, start_instances: false }) });
     console.log('[auto-setup] Complete response:', payload);
@@ -992,6 +1012,11 @@ app.addEventListener('submit', async event => {
 });
 
 app.addEventListener('input', event => {
+  if (event.target.dataset.autoWbRoom !== undefined || event.target.dataset.autoTelemostRoom !== undefined) {
+    collectAutoSetupRooms();
+    const actionsEl = document.querySelector('.wizard-actions');
+    if (actionsEl) actionsEl.innerHTML = autoSetupStepActions(state.autoSetup.state || {});
+  }
   if (event.target.dataset.filter) { state.instanceFilters[event.target.dataset.filter]=event.target.value;renderInstances(); }
   if (event.target.dataset.role === 'logs-search') refreshLogs();
   if (event.target.closest('form[data-form="https-settings"]')) updatePublicURLPreview(event.target.form);

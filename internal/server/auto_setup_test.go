@@ -332,6 +332,34 @@ func TestAutoSetupProgressShowsIncrementalRoomCapture(t *testing.T) {
 	}
 }
 
+func TestAutoSetupRecoversFromStaleCreatingInstancesState(t *testing.T) {
+	p := newTestPanel(t)
+	// Inject stale creating_instances state into database
+	stale := `{"step":"creating_instances","progress":70,"message":"Создание инстансов","current_action":"Сохранение конфигурации","wb_room_ids":["room-1","room-2","room-3"]}`
+	if err := p.store.SetSetting(context.Background(), autoSetupStateKey, stale, false); err != nil {
+		t.Fatal(err)
+	}
+
+	loginTestPanel(t, p)
+	resp := p.request(t, http.MethodGet, "/api/v1/auto-setup/status", nil, "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status code=%d", resp.StatusCode)
+	}
+	var res struct {
+		State AutoSetupState `json:"state"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		t.Fatal(err)
+	}
+	if res.State.Step != "wb_rooms_create" {
+		t.Fatalf("expected recovery to wb_rooms_create, got %s", res.State.Step)
+	}
+	if res.State.Progress != 75 {
+		t.Fatalf("expected progress 75, got %d", res.State.Progress)
+	}
+}
+
 // Helpers keep the direct unit test independent from the HTTP test fixture.
 func newTestStoreForAutoSetup(root string) (*store.Store, error) {
 	return store.Open(filepath.Join(root, "panel.db"))
