@@ -166,7 +166,7 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if cfg.SystemdEnabled && runtime.GOOS == "linux" {
-		collector := traffic.NewCollector(st)
+		collector := traffic.NewCollector(st, logger)
 		go supervise(ctx, logger, "traffic collector", collector.Run)
 	}
 	go resetScheduler(ctx, logger, st)

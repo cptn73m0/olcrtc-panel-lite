@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -66,10 +67,33 @@ func ResetDue(policy string, periodStart, now time.Time) bool {
 }
 
 // Collector reads one journald stream for all instance units.
-type Collector struct{ store *store.Store }
+type Collector struct {
+	store  *store.Store
+	logger *slog.Logger
+}
 
 // NewCollector creates a collector.
-func NewCollector(st *store.Store) *Collector { return &Collector{store: st} }
+func NewCollector(st *store.Store, logger *slog.Logger) *Collector {
+	return &Collector{store: st, logger: logger}
+}
+
+// backlogWindow bounds how far back a restart replays the journal. A saved
+// cursor older than this means the collector was down long enough for the
+// backlog to be irrelevant; replaying days of events would flood the ledger.
+const backlogWindow = 6 * time.Hour
+
+// resumeArgs builds the journalctl arguments for the next collection run.
+func resumeArgs(cursor string, lastEvent, now time.Time) []string {
+	base := []string{"--follow", "--output=json", "--unit=olcrtc-instance@*.service"}
+	if cursor != "" && now.Sub(lastEvent) <= backlogWindow {
+		return append(base, "--after-cursor="+cursor)
+	}
+	return append(base, sinceArg(now.Add(-backlogWindow)))
+}
+
+func sinceArg(since time.Time) string {
+	return "--since=@" + strconv.FormatInt(since.Unix(), 10)
+}
 
 type journalLine struct {
 	Message string `json:"MESSAGE"`
@@ -78,34 +102,44 @@ type journalLine struct {
 	Time    string `json:"__REALTIME_TIMESTAMP"`
 }
 
-// Run starts a bounded journalctl child and exits with its context.
+// Run follows the journal until the context ends. Any failure returns so the
+// supervisor restarts the collector from the last committed cursor.
 func (c *Collector) Run(ctx context.Context) error {
 	if runtime.GOOS != "linux" {
 		return nil
 	}
-	args := []string{"--follow", "--output=json", "--unit=olcrtc-instance@*.service"}
 	cursor, eventAt, err := c.store.LastTrafficCursor(ctx)
-	if err == nil && cursor != "" {
-		args = append(args, "--after-cursor="+cursor)
+	if err != nil {
+		cursor, eventAt = "", time.Time{}
 	}
-	err = c.runJournal(ctx, args)
+	err = c.runJournal(ctx, resumeArgs(cursor, eventAt, time.Now()))
 	if err == nil || ctx.Err() != nil || cursor == "" {
 		return err
 	}
 	// The journal may have rotated past the saved cursor. Resume from the
 	// last timestamp with overlap; cursor uniqueness prevents double counting.
-	fallback := []string{"--follow", "--output=json", "--unit=olcrtc-instance@*.service", "--since=@" + strconv.FormatInt(eventAt.Add(-time.Second).Unix(), 10)}
+	c.logger.Warn("journal cursor unusable, resuming by timestamp", "error", err)
+	fallback := []string{"--follow", "--output=json", "--unit=olcrtc-instance@*.service", sinceArg(eventAt.Add(-time.Second))}
 	return c.runJournal(ctx, fallback)
 }
 
 func (c *Collector) runJournal(ctx context.Context, args []string) error {
-	cmd := exec.CommandContext(ctx, "journalctl", args...)
+	runCtx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(runCtx, "journalctl", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cancel()
 		return err
 	}
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return fmt.Errorf("start journal collector: %w", err)
+	}
+	// stop kills the child and reaps it. Returning without this would leave
+	// the journalctl child running and its pipe unread.
+	stop := func() {
+		cancel()
+		_ = cmd.Wait()
 	}
 	scanner := bufio.NewScanner(stdout)
 	buffer := make([]byte, 64*1024)
@@ -128,9 +162,16 @@ func (c *Collector) runJournal(ctx context.Context, args []string) error {
 		if micros, err := strconv.ParseInt(line.Time, 10, 64); err == nil {
 			eventAt = time.UnixMicro(micros)
 		}
-		_, _ = c.store.ApplyTrafficEvent(ctx, line.Cursor, id, event.SessionID, event.Target, event.Upload, event.Download, eventAt)
+		if _, err := c.store.ApplyTrafficEvent(runCtx, line.Cursor, id, event.SessionID, event.Target, event.Upload, event.Download, eventAt); err != nil {
+			stop()
+			if runCtx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("apply traffic event: %w", err)
+		}
 	}
 	if err := scanner.Err(); err != nil {
+		stop()
 		return err
 	}
 	return cmd.Wait()

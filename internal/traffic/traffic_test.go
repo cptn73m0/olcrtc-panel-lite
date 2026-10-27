@@ -44,6 +44,32 @@ func TestParseRejectsNoise(t *testing.T) {
 	}
 }
 
+func TestResumeArgsUsesRecentCursor(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	args := resumeArgs("s=cursor", now.Add(-time.Minute), now)
+	if last := args[len(args)-1]; last != "--after-cursor=s=cursor" {
+		t.Fatalf("last arg = %q, want after-cursor", last)
+	}
+}
+
+func TestResumeArgsClampsStaleBacklog(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	args := resumeArgs("s=stale", now.Add(-48*time.Hour), now)
+	want := sinceArg(now.Add(-backlogWindow))
+	if last := args[len(args)-1]; last != want {
+		t.Fatalf("last arg = %q, want %q", last, want)
+	}
+}
+
+func TestResumeArgsWithoutCursor(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	args := resumeArgs("", time.Time{}, now)
+	want := sinceArg(now.Add(-backlogWindow))
+	if last := args[len(args)-1]; last != want {
+		t.Fatalf("last arg = %q, want %q", last, want)
+	}
+}
+
 func TestResetDue(t *testing.T) {
 	loc := time.FixedZone("server", 4*3600)
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, loc)
