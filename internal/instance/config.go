@@ -14,11 +14,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var providers = map[string]bool{"jitsi": true, "telemost": true, "wbstream": true}
+var providers = map[string]bool{
+	"jitsi": true, "telemost": true, "wbstream": true,
+	"vkcalls": true, "salutejazz": true, "mtslink": true, "max": true,
+}
 var transports = map[string]bool{"datachannel": true, "vp8channel": true, "seichannel": true, "videochannel": true}
 
 // NormalizeRoomID converts supported provider links and display formats to the upstream value.
 func NormalizeRoomID(provider, room string) string {
+	if provider == "vkcalls" {
+		return normalizeVKCallsRoom(room)
+	}
 	if provider != "telemost" {
 		return room
 	}
@@ -42,6 +48,38 @@ func NormalizeRoomID(provider, room string) string {
 		}
 	}
 	return compact
+}
+
+// normalizeVKCallsRoom rewrites the public VK link to the form the provider
+// validates: https://vk.ru/call/join/<id>.
+func normalizeVKCallsRoom(room string) string {
+	value := strings.TrimSpace(room)
+	if value == "" {
+		return value
+	}
+	value = strings.Replace(value, "https://vk.com/call/join/", "https://vk.ru/call/join/", 1)
+	value = strings.Replace(value, "http://vk.com/call/join/", "https://vk.ru/call/join/", 1)
+	value = strings.Replace(value, "http://vk.ru/call/join/", "https://vk.ru/call/join/", 1)
+	if !strings.Contains(value, "://") {
+		value = "https://" + value
+	}
+	return value
+}
+
+// validateVKCallsRoom accepts only the guest join link the provider understands.
+func validateVKCallsRoom(room string) error {
+	u, err := url.Parse(room)
+	if err != nil || u.Scheme != "https" || u.Host != "vk.ru" {
+		return errors.New("vkcalls room must be https://vk.ru/call/join/<id>")
+	}
+	id, ok := strings.CutPrefix(u.Path, "/call/join/")
+	if !ok || id == "" || strings.Contains(id, "/") {
+		return errors.New("vkcalls room must be https://vk.ru/call/join/<id>")
+	}
+	if u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return errors.New("vkcalls room URL must not contain credentials, query or fragment")
+	}
+	return nil
 }
 
 // Proxy is the normalized official upstream SOCKS proxy block.
@@ -133,6 +171,11 @@ func Validate(item model.Instance) error {
 	}
 	if item.Provider == "jitsi" {
 		if err := validateJitsiRoom(item.RoomID); err != nil {
+			return err
+		}
+	}
+	if item.Provider == "vkcalls" {
+		if err := validateVKCallsRoom(item.RoomID); err != nil {
 			return err
 		}
 	}
@@ -256,6 +299,8 @@ func CompatibilityWarning(provider, transport string) string {
 		return "В гостевом WB-потоке datachannel не передаёт данные без moderator token."
 	case "jitsi:vp8channel", "jitsi:seichannel", "jitsi:videochannel":
 		return "Видео-транспорты Jitsi нестабильны; для надёжности используйте datachannel."
+	case "vkcalls:datachannel", "vkcalls:seichannel", "vkcalls:videochannel":
+		return "VK Calls несёт данные в видео-транспорте; используйте vp8channel."
 	default:
 		return ""
 	}
