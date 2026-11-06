@@ -114,3 +114,16 @@ curl -s -o /dev/null -w '%{http_code} %{ssl_verify_result}\n' https://sub.denuwa
 systemctl is-active nginx olcrtc-panel-gl
 grep -E 'public_ip|public_port' /etc/olcrtc-gl-panel/config.yaml
 ```
+
+## Версия Xray для Reality
+
+Инбаунд живёт на отдельном бинарнике `/usr/local/bin/xray-shark` (Xray 25.3.6),
+а не на том, что в комплекте с x-ui. Причина: сервер Xray 26.9.9 отвечает
+sing-box-клиенту `REALITY: processed invalid connection: authentication failed`,
+а приложение Ghostlane работает именно на sing-box. Проверено вручную:
+26.9.9 - отказ, 25.3.6 и 24.12.31 - соединение проходит, `generate_204` через
+туннель отдаёт 204.
+
+Поэтому бинарник обновлять с оглядкой: сначала прогнать тест sing-box-клиентом,
+потом менять версию. Юнит - `xray-shark.service`, конфиг -
+`/etc/xray-shark/config.json`, бэкапы - `/root/xray-shark.json.bak-*`.
