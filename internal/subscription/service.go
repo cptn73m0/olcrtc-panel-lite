@@ -84,7 +84,7 @@ func (s *Service) Summary(ctx context.Context, slug string) (model.Subscription,
 			continue
 		}
 		raw := strings.TrimSpace(entry.RawURI)
-		if instance.ValidateClientURI(raw) != nil && instance.ValidateStandardURI(raw) != nil {
+		if instance.ValidateClientURI(raw) != nil && instance.ValidateStandardURI(raw) != nil && !instance.IsForeignURI(raw) {
 			continue
 		}
 		resolved = append(resolved, resolvedEntry{entry: entry, uri: raw})
@@ -325,7 +325,7 @@ func (s *Service) resolveEntryForFormat(ctx context.Context, entry model.Subscri
 	if entry.SourceInstanceID == nil {
 		raw := strings.TrimSpace(entry.RawURI)
 		valid := (format == "client" && instance.ValidateClientURI(raw) == nil) ||
-			(format == "olcbox" && instance.ValidateStandardURI(raw) == nil)
+			(format == "olcbox" && (instance.ValidateStandardURI(raw) == nil || instance.IsForeignURI(raw)))
 		return raw, nil, valid, nil
 	}
 	item, err := s.instances.Get(ctx, *entry.SourceInstanceID)

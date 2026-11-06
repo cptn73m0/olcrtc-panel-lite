@@ -536,8 +536,8 @@ func (s *Server) validateEntry(r *http.Request, entry model.SubscriptionEntry) e
 	if manual {
 		clientErr := instance.ValidateClientURI(entry.RawURI)
 		olcboxErr := instance.ValidateStandardURI(entry.RawURI)
-		if clientErr != nil && olcboxErr != nil {
-			return fmt.Errorf("URI не распознан как OLCRTC Client или OLCBOX: client=%v; olcbox=%v", clientErr, olcboxErr)
+		if clientErr != nil && olcboxErr != nil && !instance.IsForeignURI(entry.RawURI) {
+			return fmt.Errorf("URI не распознан как OLCRTC Client, OLCBOX или ссылка другого протокола: client=%v; olcbox=%v", clientErr, olcboxErr)
 		}
 	}
 	for _, value := range []string{entry.Name, entry.Color, entry.Icon, entry.IP, entry.Comment} {

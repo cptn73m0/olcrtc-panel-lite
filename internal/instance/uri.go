@@ -276,6 +276,23 @@ func URIFormat(raw string) string {
 
 // ValidateStandardURI rejects manual entries which do not follow the
 // OLCBOX/standard URI convention from docs/uri.md.
+// foreignSchemes are link schemes of other tunnel protocols that client
+// applications such as Ghostlane understand alongside olcrtc://. They are
+// passed through the OLCBOX feed verbatim: a subscription may carry several
+// protocols, and each line is parsed by the client on its own.
+var foreignSchemes = []string{"vless://", "vmess://", "trojan://", "ss://", "hysteria2://", "hy2://"}
+
+// IsForeignURI reports whether raw is a link of another tunnel protocol.
+func IsForeignURI(raw string) bool {
+	value := strings.TrimSpace(raw)
+	for _, scheme := range foreignSchemes {
+		if len(value) > len(scheme) && strings.EqualFold(value[:len(scheme)], scheme) {
+			return true
+		}
+	}
+	return false
+}
+
 func ValidateStandardURI(raw string) error {
 	if len(raw) > 16*1024 {
 		return errors.New("OLCBOX URI exceeds 16 KiB")
