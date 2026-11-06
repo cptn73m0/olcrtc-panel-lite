@@ -162,7 +162,14 @@ func (s *Service) render(ctx context.Context, slug, format string) (string, mode
 	lines = append(lines, "")
 	for _, item := range resolved {
 		lines = append(lines, item.uri)
-		appendEntryMetadata(&lines, item.entry, item.source)
+		// Metadata lines (##name, ##color, …) belong to the olcrtc parser of the
+		// client: it attaches them to the last olcrtc:// link it saw. A link of
+		// another protocol is invisible to that parser, so its metadata would
+		// land on the previous entry and rename it. Foreign links keep their
+		// display name in the URL fragment instead.
+		if !instance.IsForeignURI(item.uri) {
+			appendEntryMetadata(&lines, item.entry, item.source)
+		}
 		lines = append(lines, "")
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n")) + "\n", sub, nil
