@@ -169,3 +169,24 @@ http://127.0.0.1:7682   POST c=<команда>
 `ttyd` (веб-терминал) поставлен, но через Cloudflare его WebSocket рвётся
 сразу после подключения - для интерактивной работы не годится, оставлен
 как есть на 127.0.0.1:7681.
+
+## Ограничение полосы туннеля
+
+Лимит по IP здесь невозможен: Cloudflare скрывает адреса клиентов, на сервере
+все они выглядят как `127.0.0.1`. Поэтому ограничивается вся полоса туннеля.
+
+`cloudflared` держит соединение с edge на порту `7844` - это и есть весь
+клиентский трафик. Юнит `tunnel-shape.service`:
+
+`
+iptables -t mangle -A POSTROUTING -p tcp --dport 7844 -j MARK --set-mark 30
+iptables -t mangle -A POSTROUTING -p udp --dport 7844 -j MARK --set-mark 30
+tc class 1:30 htb rate 100mbit ceil 100mbit; filter fw handle 30 -> 1:30
+`
+
+Менять скорость: `/usr/local/bin/tunnel-shape.sh 50mbit && systemctl restart tunnel-shape`.
+Остальной трафик (VK и Jitsi через операторов) идёт по другим портам и под
+лимит не попадает.
+
+Старый ограничитель на `tcp/443` (`egress-shape`) удалён вместе с Reality -
+публичного 443 на машине больше нет.
