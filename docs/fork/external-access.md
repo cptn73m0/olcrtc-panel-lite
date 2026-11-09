@@ -127,3 +127,45 @@ sing-box-клиенту `REALITY: processed invalid connection: authentication f
 Поэтому бинарник обновлять с оглядкой: сначала прогнать тест sing-box-клиентом,
 потом менять версию. Юнит - `xray-shark.service`, конфиг -
 `/etc/xray-shark/config.json`, бэкапы - `/root/xray-shark.json.bak-*`.
+
+## XHTTP за Cloudflare (текущий канал)
+
+Reality на 443 удалён: РКН заблокировал IP `152.234.218.18` для российских
+сетей целиком (из-за рубежа порт был открыт, из РФ - таймаут на всех портах,
+включая ping). Проверено восемью внешними точками и двумя российскими ISP.
+
+Вместо него VLESS + XHTTP за Cloudflare-туннелем, IP в ссылке не участвует:
+
+`
+inbound   Xray 127.0.0.1:8080, path /vpn, mode packet-up
+маршрут   rdr2coop.denuwa.ru -> http://localhost:8080 (Cloudflare Tunnel)
+юнит      xray-xhttp.service, бинарник /usr/local/bin/xray-shark (25.3.6)
+конфиг    /etc/xray-xhttp/config.json
+`
+
+**Режим только `packet-up`.** В `auto` Xray выбирает `stream-up` -
+длинный дуплексный HTTP-запрос, который Cloudflare буферизует, и соединение
+висит до таймаута. `packet-up` отправляет каждый пакет отдельным POST и
+через CDN работает.
+
+Ссылка:
+
+`
+vless://<uuid>@rdr2coop.denuwa.ru:443?encryption=none&security=tls
+  &sni=rdr2coop.denuwa.ru&fp=chrome&type=xhttp
+  &host=rdr2coop.denuwa.ru&path=%2Fvpn&mode=packet-up#rdr2coop
+`
+
+## Доступ к серверу без входящих портов
+
+Когда входящий трафик режется, шелл берётся через HTTP-форму за тем же
+туннелем:
+
+`
+https://cmd.denuwa.ru   (Basic auth)   юнит webcmd.service
+http://127.0.0.1:7682   POST c=<команда>
+`
+
+`ttyd` (веб-терминал) поставлен, но через Cloudflare его WebSocket рвётся
+сразу после подключения - для интерактивной работы не годится, оставлен
+как есть на 127.0.0.1:7681.
