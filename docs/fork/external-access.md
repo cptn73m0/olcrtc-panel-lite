@@ -284,3 +284,31 @@ meet.ffmuc.net       работает: Link connected
 пускают анонимный XMPP (например, университетские и общинные). Ссылка в
 подписке у Jitsi ручная - при переезде её надо обновлять отдельно, инстанс
 сам её не перегенерирует.
+
+## nginx упирается в лимиты (симптом: пинг есть, трафика нет)
+
+10 ноября мобильный клиент не мог подключиться: индикатор показывал 97 мс, но
+трафик не шёл. В логах:
+
+`
+[warn] 1024 worker_connections are not enough, reusing connections
+[alert] socket() failed (24: Too many open files) while connecting to upstream
+`
+
+XHTTP в режиме packet-up генерирует много запросов, и без keepalive каждый
+открывал новый сокет до Xray. У nginx было `worker_connections 1024` и мягкий
+лимит дескрипторов 1024 - на активном клиенте (2558 запросов за 15 минут) они
+кончились, и часть запросов получила 500/503. Рукопожатие при этом проходило,
+поэтому «пинг» в приложении был.
+
+Что сделано:
+
+`
+worker_rlimit_nofile 65535;      в /etc/nginx/nginx.conf
+worker_connections 8192;         там же
+LimitNOFILE=65535                /etc/systemd/system/nginx.service.d/10-limits.conf
+upstream xray_xhttp { keepalive 64; }  +  proxy_set_header Connection "";
+`
+
+Keepalive до бэкенда - главное: сокеты теперь переиспользуются, а не
+пересоздаются на каждый запрос. Бэкап конфига: `/root/nginx.conf.bak-*`.
