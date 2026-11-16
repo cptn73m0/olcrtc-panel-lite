@@ -376,3 +376,57 @@ unit не active, или в логе за 30 минут есть
 стоит **последним** в логе (то есть после него не было `Link connected`).
 
 Расход очереди: 20 часов ≈ 1.2 ссылки в сутки, семь ссылок - на 5-6 дней.
+
+## Cloudflare заблокировал зону (16 ноября 2026)
+
+Cloudflare ограничил **всю зону** `denuwa.ru` за нарушение условий
+использования (VPN-трафик через туннель). Ответ на любой запрос:
+
+`
+Website Access Blocked
+Cloudflare has restricted access to this website due to Terms of Service violations.
+The affected zone is denuwa.ru.
+`
+
+Умерло сразу всё: подписка `sub.denuwa.ru`, канал `rdr2coop`, консоль
+`cmd.denuwa.ru`. Панель `vps.denuwa.ru` уцелела - она идёт через домашний
+Caddy мимо Cloudflare.
+
+## Переезд на домашний сервер
+
+Подписка и канал переехали на `vps.denuwa.ru` (домашний Caddy, валидный
+сертификат, без Cloudflare):
+
+`
+https://vps.denuwa.ru/sub/0QRLMmTuffZaTgt3XkTiuw     подписка
+https://vps.denuwa.ru/vpn                            XHTTP (vless)
+https://vps.denuwa.ru/                               панель
+`
+
+Конфиг Caddy на домашнем сервере:
+
+`
+vps.denuwa.ru {
+    handle /vpn*   { reverse_proxy http://152.234.218.18:8080 { flush_interval -1 } }
+    handle /sub/*  {
+        @short path_regexp ^/sub/([^/]+)$
+        rewrite @short /sub/{re.1}/olcbox
+        reverse_proxy https://152.234.218.18:62594 { transport http { tls_insecure_skip_verify } }
+    }
+    handle         { reverse_proxy https://152.234.218.18:62594 { transport http { tls_insecure_skip_verify } } }
+}
+`
+
+На VPS nginx XHTTP переведён с `127.0.0.1:8080` на `0.0.0.0:8080`, чтобы
+домашний сервер мог до него достучаться (порт открыт наружу, защищён UUID).
+
+Грабли, на которые наступили при переезде:
+
+- панель отдаёт **два формата** ленты: `/sub/<slug>` - компактный клиентский,
+  `/sub/<slug>/olcbox` - полный. В компактном vless-записи и olcrtc-ссылки
+  старого образца отбрасываются, поэтому нужен `rewrite` на `/olcbox`
+  (раньше это делал nginx, после переезда пришлось делать в Caddy);
+- панелей две: старая (62593) и наш форк (62594). Подписка живёт в форке,
+  поэтому `vps.denuwa.ru` целиком указывает на 62594;
+- правка записей подписки через API падает с 400, если JSON записан
+  PowerShell-ом с BOM - только `[IO.File]::WriteAllText`.
