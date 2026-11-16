@@ -430,3 +430,23 @@ vps.denuwa.ru {
   поэтому `vps.denuwa.ru` целиком указывает на 62594;
 - правка записей подписки через API падает с 400, если JSON записан
   PowerShell-ом с BOM - только `[IO.File]::WriteAllText`.
+
+### Старый адрес подписки восстановлен
+
+После блокировки зоны запись `sub.denuwa.ru` перевели с прокси Cloudflare на
+обычный A-адрес домашнего сервера (DNS only), а в домашний Caddy добавили сайт:
+
+`
+sub.denuwa.ru {
+    @short path_regexp ^/sub/([^/]+)$
+    rewrite @short /sub/{re.1}/olcbox
+    reverse_proxy https://152.234.218.18:62594 { transport http { tls_insecure_skip_verify } }
+}
+`
+
+Теперь `https://sub.denuwa.ru/sub/<slug>` и `https://vps.denuwa.ru/sub/<slug>`
+отдают одно и то же (проверено: 637 байт, три записи). Клиентам менять адрес
+подписки не нужно - старый снова работает.
+
+Отдельно: корень `denuwa.ru` тоже перевели на домашний сервер, но его сайт
+отдаёт 502 - Caddy проксирует его на `127.0.0.1:3001`, а там ничего не слушает.
