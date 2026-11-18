@@ -619,3 +619,42 @@ IPv6 (`2a02:2698:842a:4151::/64`), поэтому цепочка снова со
 
 SSH к VPS теперь тоже через IPv6 - с домашнего сервера по ключу/паролю:
 `ssh -6 root@2a01:ecc0:5000:6ed::2`. IPv4 остаётся заблокированным.
+
+### ВК перестал принимать TLS движка: локальный релей (18 ноября)
+
+Вечером 18 ноября ВК-канал умер не из-за комнаты. В логе:
+
+`
+server: failed to create transport: open engine session: auth provider rejected
+    vkcalls: do: Post "https://api.vk.me/method/auth.getAnonymToken":
+    round trip: remote error: tls: handshake failure
+`
+
+При этом с того же сервера `curl` и `openssl` к этим адресам отвечали 200.
+То есть ВК/OK начали отбрасывать TLS-отпечаток Go-клиента по SNI-хостам:
+`api.vk.me`, `calls.okcdn.ru`, `videowebrtc.okcdn.ru`. Новые ссылки из
+очереди были живыми - дело было не в них.
+
+**Решение - локальный TLS-релей на nginx.** Движок ходит в nginx, а nginx
+ходит в ВК обычным OpenSSL:
+
+`
+сертификаты  /etc/nginx/vk-mitm/{ca,server}.{crt,key}, CA в системном доверии
+nginx        /etc/nginx/conf.d/vk-mitm.conf: три server-блока на 127.0.0.1:443
+             и [::1]:443 (api.vk.me, calls.okcdn.ru, videowebrtc.okcdn.ru),
+             WebSocket-заголовки сохранены, апстримы - реальные адреса ВК
+перехват     iptables/ip6tables OUTPUT: tcp/443 от uid olcrtc -> REDIRECT на 443
+юнит         vk-relay.service (oneshot, восстанавливает правила после ребута)
+резолвер     drop-in с GODEBUG=netdns=cgo, чтобы /etc/hosts учитывался
+`
+
+Инстанс 1 теперь работает от пользователя `olcrtc` (иначе правило по uid не
+различит его трафик от трафика других служб).
+
+Итог: `Link connected`, канал живой. Побочно: в сторожа добавлено
+подавление спама уведомлений (`notify_once`, не чаще раза в 6 часов на
+состояние) - раньше при пустой очереди он писал каждые 5 минут.
+
+Очередь пополнилась двумя новыми ссылками из чата сообщества; ingestion
+работает, но читает сообщения раз в 5 минут, поэтому «кинул и сразу проверил»
+может не сработать.
