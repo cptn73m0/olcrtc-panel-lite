@@ -658,3 +658,41 @@ nginx        /etc/nginx/conf.d/vk-mitm.conf: три server-блока на 127.0
 Очередь пополнилась двумя новыми ссылками из чата сообщества; ingestion
 работает, но читает сообщения раз в 5 минут, поэтому «кинул и сразу проверил»
 может не сработать.
+
+### Свой Jitsi Meet на домашнем сервере (18 ноября)
+
+Публичный `meet.ffmuc.net` регулярно отваливался (XMPP WebSocket умирал, движок
+исчерпывал реконнекты и выходил с кодом 0). Подняли свой:
+
+`
+стек      docker-jitsi-meet в /opt/jitsi (web, prosody, jicofo, jvb)
+порты     web 8000, jvb 10000/udp, prosody 5280 (только localhost)
+домен     meet.denuwa.ru -> 5.166.240.180 (A, DNS only)
+Caddy     meet.denuwa.ru: /xmpp-websocket* -> 127.0.0.1:5280, остальное -> 8000
+комната   meet.denuwa.ru/olcrtc-home-7f3a
+`
+
+По дороге пришлось разрулить:
+
+- `Webmin` занимал 10000 (и TCP, и UDP) - удалён по просьбе владельца;
+- `HFS` занимал 8080 - удалён;
+- `olcrtc-panel` держит 8443 - Jitsi-web переведён на 8444;
+- в образе web нет маршрута `/xmpp-websocket` (отдавал 501), поэтому путь
+  проксируется через Caddy напрямую в prosody:5280;
+- prosody падал на правах `/storage/prosody` - `chown 1000:1000`.
+
+**Главная находка: IPv4 с VPS до домашнего адреса не ходит** (ping проходит, TCP
+на 22/80/443 - таймаут), при этом внешние точки видят домашний 443 нормально.
+По IPv6 путь работает: `ping6` 35 мс, `https` 200. Поэтому движку прописан
+`/etc/hosts`: `2a02:2698:842a:4151:e611:5bff:fed4:5a34 meet.denuwa.ru`.
+
+Подписка собирается из кеша на домашнем; refresher подменяет старую комнату
+ffmuc на нашу:
+
+`
+OLCRTC_JITSI_OLD = "meet.ffmuc.net/olcrtc-954f5b41"
+OLCRTC_JITSI_NEW = "meet.denuwa.ru/olcrtc-home-7f3a"
+`
+
+Инстанс 10 добавлен drop-in с `Restart=always` - движок больше не остаётся
+лежать после исчерпания реконнектов.
